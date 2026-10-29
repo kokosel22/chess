@@ -40,7 +40,7 @@ class CaptureService : Service() {
     @Volatile private var hiddenAt = 0L
     @Volatile private var closing = false
     @Volatile private var geometryValid = true
-    private var stable: CharArray? = null
+    @Volatile private var stable: CharArray? = null
     private var stableCount = 0
     private var lastEngineFen: String? = null
     private var lastEngineResult: ru.chesscoach.overlay.engine.EngineResult? = null

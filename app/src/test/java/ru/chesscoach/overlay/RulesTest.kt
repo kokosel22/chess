@@ -56,6 +56,12 @@ class RulesTest {
         val p = Position.fromFen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1")
         assertFalse(p.inCheck()); assertEquals("1/2-1/2", p.outcome())
     }
+    @Test fun claimsAreDistinctFromAutomaticDraws() {
+        val p = Position.fromFen("4k3/8/8/8/8/8/8/R3K3 w - - 100 60")
+        assertTrue(p.canClaimDraw()); assertNull(p.outcome()); assertNull(p.outcome(3))
+        assertEquals("1/2-1/2", p.outcome(5))
+        assertEquals("1/2-1/2", Position.fromFen("4k3/8/8/8/8/8/8/R3K3 w - - 150 80").outcome())
+    }
     @Test fun invalidFenRejected() {
         for (fen in listOf("8/8/8/8/8/8/8/8 w - - 0 1", "8/8/8/8/8/8/4k3/4K3 w - - 0 1", "4k3/8/8/8/8/8/8/4K3 w K - 0 1", "4k3/8/8/8/8/8/8/4K3 w - e6 0 1", "4k3/8/8/8/8/8/8/4K3 x - - 0 1", "4k3/8/8/8/8/8/8/P3K3 w - - 0 1")) {
             assertThrows(IllegalArgumentException::class.java) { Position.fromFen(fen) }

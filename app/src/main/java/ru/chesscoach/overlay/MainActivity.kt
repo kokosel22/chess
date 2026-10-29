@@ -29,7 +29,7 @@ import java.io.File
 import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
-    private val background = Color.rgb(242, 247, 245)
+    private val surfaceColor = Color.rgb(242, 247, 245)
     private val ink = Color.rgb(20, 48, 44)
     private val muted = Color.rgb(74, 99, 92)
     private val accent = Color.rgb(15, 118, 110)
@@ -57,7 +57,7 @@ class MainActivity : Activity() {
     override fun onSaveInstanceState(outState: Bundle) { outState.putString("export", exportText); super.onSaveInstanceState(outState) }
     private fun newPage(title: String, subtitle: String) {
         status = null
-        val scroll = ScrollView(this).apply { setBackgroundColor(background); isFillViewport = true }
+        val scroll = ScrollView(this).apply { setBackgroundColor(surfaceColor); isFillViewport = true }
         page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(24), dp(24), dp(24), dp(32)) }
         scroll.addView(page)
         scroll.setOnApplyWindowInsetsListener { view, insets ->

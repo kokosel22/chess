@@ -34,6 +34,9 @@ jobs:
           gradle-version: '8.10.2'
       - name: Android SDK (cloud runner only)
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
       - name: Install cloud SDK and NDK
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.2.12479018'
       - name: Restore stable debug signing key
@@ -47,8 +50,29 @@ jobs:
           if [ ! -f "$HOME/.android/debug.keystore" ]; then
             keytool -genkeypair -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -dname 'CN=Android Debug,O=Android,C=US' -keyalg RSA -keysize 2048 -validity 10000
           fi
+      - name: Restore compiled engine
+        id: engine-cache
+        uses: actions/cache/restore@v4
+        with:
+          key: stockfish-17.1-ndk27-v1
+          path: |
+            app/src/main/jniLibs/
+            app/src/main/assets/
+            .cloud/stockfish-source.tar.gz
+            .cloud/BUILD-STOCKFISH.sh
       - name: Compile bundled Stockfish ARM64 and emulator engine
+        if: steps.engine-cache.outputs.cache-hit != 'true'
         run: bash scripts/prepare-stockfish.sh
+      - name: Cache compiled engine
+        if: steps.engine-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: stockfish-17.1-ndk27-v1
+          path: |
+            app/src/main/jniLibs/
+            app/src/main/assets/
+            .cloud/stockfish-source.tar.gz
+            .cloud/BUILD-STOCKFISH.sh
       - name: Rules tests, lint and installable APK
         run: gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
       - name: Prepare installation bundle

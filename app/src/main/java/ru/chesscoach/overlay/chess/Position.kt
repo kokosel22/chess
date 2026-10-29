@@ -168,7 +168,7 @@ class Position private constructor(
     }
     fun outcome(repetitions: Int = 1): String? {
         if (legalMoves().isEmpty()) return if (inCheck()) (if (white) "0-1" else "1-0") else "1/2-1/2"
-        if (halfmove >= 100 || repetitions >= 3) return "1/2-1/2"
+        if (halfmove >= 150 || repetitions >= 5) return "1/2-1/2"
         val men = cells.filter { it != '.' && it.lowercaseChar() != 'k' }
         if (men.isEmpty() || (men.size == 1 && men[0].lowercaseChar() in "bn")) return "1/2-1/2"
         if (men.all { it.lowercaseChar() == 'b' }) {
@@ -177,6 +177,7 @@ class Position private constructor(
         }
         return null
     }
+    fun canClaimDraw(repetitions: Int = 1) = halfmove >= 100 || repetitions >= 3
     companion object {
         const val START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
         private val DIAGONAL = listOf(1 to 1, 1 to -1, -1 to 1, -1 to -1)
@@ -204,7 +205,12 @@ class Position private constructor(
             require((0..7).none { b[it].lowercaseChar() == 'p' || b[56 + it].lowercaseChar() == 'p' })
             for (side in listOf(true, false)) {
                 require(b.count { it != '.' && it.isUpperCase() == side } <= 16)
-                require(b.count { it == if (side) 'P' else 'p' } <= 8)
+                val pawnCount = b.count { it == if (side) 'P' else 'p' }
+                require(pawnCount <= 8)
+                fun count(piece: Char) = b.count { it == if (side) piece else piece.lowercaseChar() }
+                val bishops = b.indices.filter { b[it] == if (side) 'B' else 'b' }.groupingBy { (it / 8 + it % 8) % 2 }.eachCount()
+                val promotions = (count('Q') - 1).coerceAtLeast(0) + (count('R') - 2).coerceAtLeast(0) + (count('N') - 2).coerceAtLeast(0) + bishops.values.sumOf { (it - 1).coerceAtLeast(0) }
+                require(promotions <= 8 - pawnCount) { "Невозможное число превращённых фигур" }
             }
             require(!p.inCheck(!p.white)) { "Сторона, завершившая ход, оставила короля под шахом" }
             for ((flag, king, rook) in listOf(Triple('K', 4, 7), Triple('Q', 4, 0), Triple('k', 60, 63), Triple('q', 60, 56)))
