@@ -153,7 +153,10 @@ class BoardRecognizer(@Suppress("UNUSED_PARAMETER") context: Context) {
         val masks = patches.mapIndexed { i, pixels -> foregroundMask(pixels, backgrounds[i]) }
         val occupied = masks.map { it.count { foreground -> foreground } }
         val validLayout = (0..63).all { i -> if (i / 8 in listOf(0, 1, 6, 7)) occupied[i] in 45..650 else occupied[i] < 28 }
-        if (!validLayout) { lastError = "Для обучения нужна полная начальная расстановка до первого хода"; return null }
+        if (!validLayout) {
+            android.util.Log.d("BoardRecognition", "Calibration occupancy: $occupied")
+            lastError = "Для обучения нужна полная начальная расстановка до первого хода"; return null
+        }
         // Pawns must repeat the same shape; a menu, 3D board or arbitrary position
         // cannot simply be labelled as the initial chess position.
         for (row in listOf(1, 6)) {
@@ -162,7 +165,10 @@ class BoardRecognizer(@Suppress("UNUSED_PARAMETER") context: Context) {
                 val other = masks[row * 8 + col]
                 val intersection = reference.indices.count { reference[it] && other[it] }
                 val union = reference.indices.count { reference[it] || other[it] }
-                if (intersection.toDouble() / maxOf(union, 1) < .68) { lastError = "Неустойчивая начальная расстановка; отключите анимацию и метки ходов"; return null }
+                if (intersection.toDouble() / maxOf(union, 1) < .68) {
+                    android.util.Log.d("BoardRecognition", "Pawn mismatch: row=$row col=$col intersection=$intersection union=$union")
+                    lastError = "Неустойчивая начальная расстановка; отключите анимацию и метки ходов"; return null
+                }
             }
         }
         fun brightness(row: Int): Double = (0..7).map { col ->
@@ -190,6 +196,7 @@ class BoardRecognizer(@Suppress("UNUSED_PARAMETER") context: Context) {
             val expected = initial[index]
             val scores = templates.map { (piece, variants) -> piece to variants.minOf { templateCost(patches[i], backgrounds[i], it) } }.sortedBy { it.second }
             if (scores[0].first != expected || scores[1].second - scores[0].second < 85) {
+                android.util.Log.d("BoardRecognition", "Template separation: expected=$expected scores=${scores.take(3)}")
                 templates.clear(); lastError = "Набор фигур не удалось различить. Выберите стандартный контрастный набор 2D."; return null
             }
         }

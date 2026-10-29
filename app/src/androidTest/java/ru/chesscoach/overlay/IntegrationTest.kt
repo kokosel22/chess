@@ -58,7 +58,7 @@ class IntegrationTest {
             val rect = recognizer.locate(image); assertNotNull(rect)
             assertTrue(kotlin.math.abs(rect!!.top - 240) <= 8)
             val result = recognizer.recognize(image, rect, true)
-            assertNotNull(result); assertArrayEquals(Position.initial().cells, result!!.cells); assertEquals(orientation, result.whiteAtBottom)
+            assertNotNull(recognizer.lastError, result); assertArrayEquals(Position.initial().cells, result!!.cells); assertEquals(orientation, result.whiteAtBottom)
             image.recycle(); recognizer.reset()
         }
     }
@@ -67,7 +67,9 @@ class IntegrationTest {
         val next = Position.initial().play(Move.parse("g1f3"))
         val image = board(next, true); val recognizer = BoardRecognizer(context)
         val initial = board(Position.initial(), true)
-        assertNotNull(recognizer.recognize(initial, Rect(0, 240, 720, 960), true)); initial.recycle()
+        File(context.getExternalFilesDir(null), "fixture-initial.png").outputStream().use { initial.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val calibration = recognizer.recognize(initial, Rect(0, 240, 720, 960), true)
+        assertNotNull(recognizer.lastError, calibration); initial.recycle()
         val result = recognizer.recognize(image, Rect(0, 240, 720, 960), true)!!
         assertTrue(tracker.observe(result.cells) is Observation.Advanced)
         assertEquals(next.fen(), tracker.position!!.fen()); image.recycle()

@@ -127,9 +127,7 @@ jobs:
           ram-size: 2048M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
-          script: |
-            gradle --no-daemon --stacktrace :app:connectedDebugAndroidTest
-            adb pull /sdcard/Android/data/ru.chesscoach.overlay/files/ .cloud/screenshots/
+          script: bash scripts/run-device-tests.sh
       - name: Upload test results and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -138,7 +136,7 @@ jobs:
           path: |
             app/build/reports/
             app/build/outputs/androidTest-results/
-            .cloud/screenshots/
+            .cloud/device-diagnostics/
           retention-days: 14
           include-hidden-files: true
           if-no-files-found: warn
