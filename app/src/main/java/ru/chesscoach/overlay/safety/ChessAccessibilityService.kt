@@ -23,8 +23,11 @@ class ChessAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (!AppState.running || event == null) return
         if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
-            dirty = true
-            if (event.packageName?.toString() !in listOf("com.chess", packageName)) invalidate("Активный экран изменился")
+            val eventPackage = event.packageName?.toString()
+            if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || eventPackage == "com.chess") dirty = true
+            // Overlay visibility emits WINDOWS_CHANGED with no package. It must not
+            // revoke an ongoing search; inspect() still checks the active package.
+            if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && eventPackage != null && eventPackage !in listOf("com.chess", packageName)) invalidate("Активный экран изменился")
             inspect()
         } else if (event.packageName?.toString() == "com.chess") {
             dirty = true
