@@ -2,27 +2,18 @@ package ru.chesscoach.overlay.vision
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Rect
 import ru.chesscoach.overlay.chess.Position
-import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 data class RecognizedBoard(val rect: Rect, val cells: CharArray, val whiteAtBottom: Boolean, val confidence: Double)
 
-/** Offline template recognition. Unknown piece themes, animation and occlusion fail closed. */
-class BoardRecognizer(context: Context) {
+/** Learns local templates from the first standard starting position. No remote assets. */
+class BoardRecognizer(@Suppress("UNUSED_PARAMETER") context: Context) {
     private val n = 28
-    private val templates: Map<Char, IntArray> = "PNBRQKpnbrqk".associateWith { piece ->
-        val name = (if (piece.isUpperCase()) "w" else "b") + piece.lowercaseChar()
-        context.assets.open("pieces/$name.png").use { input ->
-            val original = requireNotNull(BitmapFactory.decodeStream(input))
-            val scaled = Bitmap.createScaledBitmap(original, n, n, true)
-            val pixels = IntArray(n * n); scaled.getPixels(pixels, 0, n, 0, 0, n, n)
-            if (scaled !== original) scaled.recycle(); original.recycle(); pixels
-        }
-    }
+    private val templates = mutableMapOf<Char, MutableList<IntArray>>()
     private var cached: Rect? = null
     var lastError = "Ищу доску"; private set
     fun locate(frame: Bitmap): Rect? {
@@ -39,16 +30,49 @@ class BoardRecognizer(context: Context) {
                 for (x in listOf(0, (w - size) / 2, w - size).distinct()) {
                     for (y in 0..(small.height - size) step 4) {
                         val candidate = Rect(x, y, x + size, y + size)
-                        val score = gridScore(small, candidate)
+                        val score = gridScore(small, candidate) + size * .000001
                         if (score > best) { best = score; result = candidate }
                     }
                 }
             }
+            // Corner colors have a plateau around grid edges. Refine against actual
+            // color transitions so the template crop does not drift by several pixels.
+            result?.let { coarse ->
+                var fineBest = -1.0
+                for (size in (coarse.width() - 5)..(coarse.width() + 5))
+                    for (x in (coarse.left - 4)..(coarse.left + 4))
+                        for (y in (coarse.top - 4)..(coarse.top + 4)) {
+                            val test = Rect(x, y, x + size, y + size)
+                            val grid = gridScore(small, test)
+                            if (grid < .77) continue
+                            val score = grid * .7 + alignmentScore(small, test) * .3
+                            if (score > fineBest) { fineBest = score; result = test }
+                        }
+            }
             val rect = result?.let { Rect((it.left / scale).roundToInt(), (it.top / scale).roundToInt(), (it.right / scale).roundToInt(), (it.bottom / scale).roundToInt()) }
             cached = rect
-            if (rect == null) lastError = "Доска не найдена: откройте новую партию, 2D-доску и фигуры Neo"
+            if (rect == null) lastError = "Доска не найдена: откройте новую стандартную партию и 2D-доску"
             return rect
         } finally { if (small !== frame) small.recycle() }
+    }
+    private fun alignmentScore(image: Bitmap, rect: Rect): Double {
+        val cell = rect.width() / 8.0
+        var fit = 0; var total = 0
+        for (boundary in 1..7) for (sample in listOf(0, 2, 5, 7)) {
+            val bx = (rect.left + boundary * cell).roundToInt()
+            val sy = (rect.top + (sample + .10) * cell).toInt()
+            val by = (rect.top + boundary * cell).roundToInt()
+            val sx = (rect.left + (sample + .10) * cell).toInt()
+            if (bx > 0 && bx + 1 < image.width && sy in 0 until image.height) {
+                if (distance(image.getPixel(bx - 1, sy), image.getPixel(bx + 1, sy)) > 2200) fit++
+                total++
+            }
+            if (by > 0 && by + 1 < image.height && sx in 0 until image.width) {
+                if (distance(image.getPixel(sx, by - 1), image.getPixel(sx, by + 1)) > 2200) fit++
+                total++
+            }
+        }
+        return if (total > 0) fit.toDouble() / total else 0.0
     }
     private fun distance(a: Int, b: Int): Int {
         val dr = Color.red(a) - Color.red(b); val dg = Color.green(a) - Color.green(b); val db = Color.blue(a) - Color.blue(b)
@@ -79,28 +103,22 @@ class BoardRecognizer(context: Context) {
         val crop = Bitmap.createBitmap(frame, rect.left, rect.top, rect.width(), rect.height())
         val normalized = Bitmap.createScaledBitmap(crop, n * 8, n * 8, true)
         try {
+            val patches = (0..63).map { i -> IntArray(n * n).also { normalized.getPixels(it, 0, n, i % 8 * n, i / 8 * n, n, n) } }
+            val backgrounds = patches.map { pixels -> medianColor(listOf(pixels[2 * n + 2], pixels[2 * n + n - 3], pixels[(n - 3) * n + 2], pixels[(n - 3) * n + n - 3])) }
+            if (templates.isEmpty()) return calibrate(rect, patches, backgrounds)
             val screen = CharArray(64); var minMargin = 1.0
             for (row in 0..7) for (col in 0..7) {
-                val pixels = IntArray(n * n)
-                normalized.getPixels(pixels, 0, n, col * n, row * n, n, n)
-                val bg = medianColor(listOf(pixels[2 * n + 2], pixels[2 * n + n - 3], pixels[(n - 3) * n + 2], pixels[(n - 3) * n + n - 3]))
+                val pixels = patches[row * 8 + col]
+                val bg = backgrounds[row * 8 + col]
                 val costs = mutableListOf('.' to pixels.indices.sumOf { distance(pixels[it], bg).toDouble() } / pixels.size)
-                for ((piece, template) in templates) {
-                    var error = 0.0
-                    for (i in pixels.indices) {
-                        val alpha = Color.alpha(template[i]) / 255.0
-                        val r = (Color.red(template[i]) * alpha + Color.red(bg) * (1 - alpha)).roundToInt()
-                        val g = (Color.green(template[i]) * alpha + Color.green(bg) * (1 - alpha)).roundToInt()
-                        val b = (Color.blue(template[i]) * alpha + Color.blue(bg) * (1 - alpha)).roundToInt()
-                        error += distance(pixels[i], Color.rgb(r, g, b))
-                    }
-                    costs += piece to error / pixels.size
+                for ((piece, variants) in templates) {
+                    costs += piece to variants.minOf { templateCost(pixels, bg, it) }
                 }
                 costs.sortBy { it.second }
                 val first = costs[0]; val second = costs[1]
                 val margin = (second.second - first.second) / maxOf(second.second, 1.0)
                 if (first.second > 2600 || (first.first != '.' && (margin < .11 || second.second - first.second < 85))) {
-                    lastError = "Фигуры не распознаны уверенно: дождитесь конца анимации; выберите тему Neo"
+                    lastError = "Фигуры не распознаны уверенно: дождитесь конца анимации или начните новую тренировку"
                     return null
                 }
                 screen[row * 8 + col] = first.first
@@ -121,5 +139,68 @@ class BoardRecognizer(context: Context) {
             return RecognizedBoard(rect, cells, orientation, minMargin)
         } finally { if (normalized !== crop) normalized.recycle(); crop.recycle() }
     }
-    fun reset() { cached = null }
+    private fun templateCost(pixels: IntArray, bg: Int, template: IntArray): Double {
+        var error = 0.0
+        for (i in pixels.indices) {
+            val alpha = Color.alpha(template[i]) / 255.0
+            val r = (Color.red(template[i]) * alpha + Color.red(bg) * (1 - alpha)).roundToInt()
+            val g = (Color.green(template[i]) * alpha + Color.green(bg) * (1 - alpha)).roundToInt()
+            val b = (Color.blue(template[i]) * alpha + Color.blue(bg) * (1 - alpha)).roundToInt()
+            error += distance(pixels[i], Color.rgb(r, g, b))
+        }
+        return error / pixels.size
+    }
+    private fun calibrate(rect: Rect, patches: List<IntArray>, backgrounds: List<Int>): RecognizedBoard? {
+        val masks = patches.mapIndexed { i, pixels -> pixels.map { distance(it, backgrounds[i]) > 1800 } }
+        val occupied = masks.map { it.count { foreground -> foreground } }
+        val validLayout = (0..63).all { i -> if (i / 8 in listOf(0, 1, 6, 7)) occupied[i] in 45..650 else occupied[i] < 28 }
+        if (!validLayout) { lastError = "Для обучения нужна полная начальная расстановка до первого хода"; return null }
+        // Pawns must repeat the same shape; a menu, 3D board or arbitrary position
+        // cannot simply be labelled as the initial chess position.
+        for (row in listOf(1, 6)) {
+            val reference = masks[row * 8]
+            for (col in 1..7) {
+                val other = masks[row * 8 + col]
+                val intersection = reference.indices.count { reference[it] && other[it] }
+                val union = reference.indices.count { reference[it] || other[it] }
+                if (intersection.toDouble() / maxOf(union, 1) < .68) { lastError = "Неустойчивая начальная расстановка; отключите анимацию и метки ходов"; return null }
+            }
+        }
+        fun brightness(row: Int): Double = (0..7).map { col ->
+            val i = row * 8 + col
+            patches[i].filterIndexed { index, _ -> masks[i][index] }.map { (Color.red(it) + Color.green(it) + Color.blue(it)) / 3.0 }.average()
+        }.average()
+        val top = brightness(1); val bottom = brightness(6)
+        if (kotlin.math.abs(top - bottom) < 35) { lastError = "Цвет фигур не различим; выберите контрастные светлые и тёмные фигуры"; return null }
+        val whiteBottom = bottom > top
+        val initial = Position.initial().cells
+        for (screenIndex in 0..63) {
+            if (screenIndex / 8 !in listOf(0, 1, 6, 7)) continue
+            val boardIndex = if (whiteBottom) (7 - screenIndex / 8) * 8 + screenIndex % 8 else (screenIndex / 8) * 8 + 7 - screenIndex % 8
+            val piece = initial[boardIndex]
+            val bg = backgrounds[screenIndex]
+            val template = patches[screenIndex].map { pixel ->
+                val delta = sqrt(distance(pixel, bg).toDouble())
+                val alpha = ((delta - 16.0) / 24.0).coerceIn(0.0, 1.0)
+                if (alpha < .02) Color.TRANSPARENT else {
+                    fun channel(value: Int, background: Int) = ((value - background * (1 - alpha)) / alpha).roundToInt().coerceIn(0, 255)
+                    Color.argb((alpha * 255).roundToInt(), channel(Color.red(pixel), Color.red(bg)), channel(Color.green(pixel), Color.green(bg)), channel(Color.blue(pixel), Color.blue(bg)))
+                }
+            }.toIntArray()
+            templates.getOrPut(piece) { mutableListOf() }.add(template)
+        }
+        // Reject styles whose shapes do not separate all six piece classes.
+        for (i in 0..63) {
+            if (i / 8 !in listOf(0, 1, 6, 7)) continue
+            val index = if (whiteBottom) (7 - i / 8) * 8 + i % 8 else i / 8 * 8 + 7 - i % 8
+            val expected = initial[index]
+            val scores = templates.map { (piece, variants) -> piece to variants.minOf { templateCost(patches[i], backgrounds[i], it) } }.sortedBy { it.second }
+            if (scores[0].first != expected || scores[1].second - scores[0].second < 85) {
+                templates.clear(); lastError = "Набор фигур не удалось различить. Выберите стандартный контрастный набор 2D."; return null
+            }
+        }
+        lastError = "Фигуры изучены по начальной расстановке"
+        return RecognizedBoard(rect, initial.copyOf(), whiteBottom, 1.0)
+    }
+    fun reset() { cached = null; templates.clear() }
 }

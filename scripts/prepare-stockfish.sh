@@ -2,7 +2,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 cloud="$root/.cloud"
-mkdir -p "$cloud" "$root/app/src/main/assets/stockfish" "$root/app/src/main/assets/pieces"
+mkdir -p "$cloud" "$root/app/src/main/assets/stockfish"
 if [[ ! -d "$cloud/Stockfish/.git" ]]; then
   git clone --depth 1 --branch sf_17.1 https://github.com/official-stockfish/Stockfish.git "$cloud/Stockfish"
 fi
@@ -26,9 +26,4 @@ git -C .. rev-parse HEAD > "$root/app/src/main/assets/stockfish/SOURCE_COMMIT.tx
 # Full corresponding engine source, bundled NNUE and exact build script travel with the APK.
 tar --exclude=.git --exclude='*.o' --exclude=stockfish --exclude=.depend -czf "$cloud/stockfish-source.tar.gz" -C "$cloud" Stockfish
 cd "$root"
-for side in w b; do
-  for piece in p n b r q k; do
-    curl --fail --location --retry 4 --retry-delay 2 "https://images.chesscomfiles.com/chess-themes/pieces/neo/150/${side}${piece}.png" -o "app/src/main/assets/pieces/${side}${piece}.png"
-  done
-done
 cp scripts/prepare-stockfish.sh "$cloud/BUILD-STOCKFISH.sh"

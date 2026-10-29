@@ -6,12 +6,9 @@ Source: https://github.com/official-stockfish/Stockfish/tree/sf_17.1
 
 Copyright Stockfish contributors. GPL-3.0-or-later. Built without source modifications, using the Android NDK. The official source's network downloader verifies the SHA-256 prefix embedded in each NNUE filename. NNUE is embedded in the executable, and no device-time download is used. Full corresponding source including the network files, exact build script, upstream AUTHORS and license accompany each APK artifact. Actual source commit is included in the APK asset `stockfish/SOURCE_COMMIT.txt`.
 
-## Chess.com Neo recognition templates
+## Screen recognition
 
-The build runner retrieves twelve reference PNG files from the public Chess.com theme CDN:
-`https://images.chesscomfiles.com/chess-themes/pieces/neo/150/{w,b}{p,n,b,r,q,k}.png`
-
-These files are used only as recognition templates. They are owned by their respective copyright holders; the GPL license for this repository does not relicense these assets. Chess.com and its trademarks belong to their respective owners. This application is independent and is not endorsed by Chess.com. Redistribution of the reference assets is subject to their owners' rights.
+No Chess.com image assets are bundled or downloaded. Piece templates are learned from the standard initial board in the user's consented screen capture and remain in memory for that capture session. The test fixture draws system-font chess glyphs. Chess.com and its trademarks belong to their respective owners. This application is independent and is not endorsed by Chess.com.
 
 ## Build and test dependencies
 

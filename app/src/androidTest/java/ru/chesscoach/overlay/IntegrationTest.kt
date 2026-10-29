@@ -38,9 +38,13 @@ class IntegrationTest {
             val index = if (whiteBottom) (7 - r) * 8 + f else r * 8 + 7 - f
             val piece = position.cells[index]
             if (piece != '.') {
-                val name = (if (piece.isUpperCase()) "w" else "b") + piece.lowercaseChar()
-                val sprite = context.assets.open("pieces/$name.png").use { BitmapFactory.decodeStream(it) }
-                canvas.drawBitmap(sprite, null, rect, paint); sprite.recycle()
+                val glyph = when (piece.lowercaseChar()) { 'k' -> "♚"; 'q' -> "♛"; 'r' -> "♜"; 'b' -> "♝"; 'n' -> "♞"; else -> "♟" }
+                paint.textSize = cell * .82f; paint.typeface = Typeface.create("serif", Typeface.NORMAL); paint.textAlign = Paint.Align.CENTER
+                paint.style = Paint.Style.STROKE; paint.strokeWidth = 2f; paint.color = Color.rgb(25, 25, 25)
+                val y = rect.centerY() - (paint.ascent() + paint.descent()) / 2
+                canvas.drawText(glyph, rect.exactCenterX(), y, paint)
+                paint.style = Paint.Style.FILL; paint.color = if (piece.isUpperCase()) Color.rgb(248, 248, 240) else Color.rgb(35, 35, 35)
+                canvas.drawText(glyph, rect.exactCenterX(), y, paint)
             }
         }
         return image
@@ -60,6 +64,8 @@ class IntegrationTest {
         val tracker = GameTracker(); tracker.observe(Position.initial().cells)
         val next = Position.initial().play(Move.parse("g1f3"))
         val image = board(next, true); val recognizer = BoardRecognizer(context)
+        val initial = board(Position.initial(), true)
+        assertNotNull(recognizer.recognize(initial, Rect(0, 240, 720, 960), true)); initial.recycle()
         val result = recognizer.recognize(image, Rect(0, 240, 720, 960), true)!!
         assertTrue(tracker.observe(result.cells) is Observation.Advanced)
         assertEquals(next.fen(), tracker.position!!.fen()); image.recycle()

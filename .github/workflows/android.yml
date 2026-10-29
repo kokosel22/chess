@@ -54,7 +54,7 @@ jobs:
         id: engine-cache
         uses: actions/cache/restore@v4
         with:
-          key: stockfish-17.1-ndk27-v1
+          key: stockfish-17.1-ndk27-v2
           path: |
             app/src/main/jniLibs/
             app/src/main/assets/
@@ -67,7 +67,7 @@ jobs:
         if: steps.engine-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          key: stockfish-17.1-ndk27-v1
+          key: stockfish-17.1-ndk27-v2
           path: |
             app/src/main/jniLibs/
             app/src/main/assets/
@@ -110,7 +110,9 @@ jobs:
           ram-size: 2048M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
-          script: gradle --no-daemon --stacktrace :app:connectedDebugAndroidTest
+          script: |
+            gradle --no-daemon --stacktrace :app:connectedDebugAndroidTest
+            adb pull /sdcard/Android/data/ru.chesscoach.overlay/files/ .cloud/screenshots/
       - name: Upload test results and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -119,5 +121,6 @@ jobs:
           path: |
             app/build/reports/
             app/build/outputs/androidTest-results/
+            .cloud/screenshots/
           retention-days: 14
           if-no-files-found: warn

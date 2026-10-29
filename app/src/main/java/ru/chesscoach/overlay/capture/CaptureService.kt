@@ -108,7 +108,7 @@ class CaptureService : Service() {
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader!!.surface, null, capture)
             overlay = CoachOverlay(this) { stopSelf() }
             AppState.running = true; AppState.boardRect = null
-            AppState.clearAdvice("Откройте новую партию с ботом. Фигуры: Neo, доска: 2D.")
+            AppState.clearAdvice("Откройте новую стандартную партию с ботом. Доска: 2D; начальную расстановку оставьте до подтверждения.")
             main.post(tick); main.post(watchdog)
         } catch (e: Exception) { AppState.clearAdvice("Не удалось начать захват: ${e.message}"); stopSelf() }
         return START_NOT_STICKY
