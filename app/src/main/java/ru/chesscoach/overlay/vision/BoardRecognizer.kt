@@ -6,7 +6,6 @@ import android.graphics.Color
 import android.graphics.Rect
 import ru.chesscoach.overlay.chess.Position
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
 data class RecognizedBoard(val rect: Rect, val cells: CharArray, val whiteAtBottom: Boolean, val confidence: Double)
 
@@ -151,7 +150,7 @@ class BoardRecognizer(@Suppress("UNUSED_PARAMETER") context: Context) {
         return error / pixels.size
     }
     private fun calibrate(rect: Rect, patches: List<IntArray>, backgrounds: List<Int>): RecognizedBoard? {
-        val masks = patches.mapIndexed { i, pixels -> pixels.map { distance(it, backgrounds[i]) > 1800 } }
+        val masks = patches.mapIndexed { i, pixels -> foregroundMask(pixels, backgrounds[i]) }
         val occupied = masks.map { it.count { foreground -> foreground } }
         val validLayout = (0..63).all { i -> if (i / 8 in listOf(0, 1, 6, 7)) occupied[i] in 45..650 else occupied[i] < 28 }
         if (!validLayout) { lastError = "Для обучения нужна полная начальная расстановка до первого хода"; return null }
@@ -179,13 +178,8 @@ class BoardRecognizer(@Suppress("UNUSED_PARAMETER") context: Context) {
             val boardIndex = if (whiteBottom) (7 - screenIndex / 8) * 8 + screenIndex % 8 else (screenIndex / 8) * 8 + 7 - screenIndex % 8
             val piece = initial[boardIndex]
             val bg = backgrounds[screenIndex]
-            val template = patches[screenIndex].map { pixel ->
-                val delta = sqrt(distance(pixel, bg).toDouble())
-                val alpha = ((delta - 16.0) / 24.0).coerceIn(0.0, 1.0)
-                if (alpha < .02) Color.TRANSPARENT else {
-                    fun channel(value: Int, background: Int) = ((value - background * (1 - alpha)) / alpha).roundToInt().coerceIn(0, 255)
-                    Color.argb((alpha * 255).roundToInt(), channel(Color.red(pixel), Color.red(bg)), channel(Color.green(pixel), Color.green(bg)), channel(Color.blue(pixel), Color.blue(bg)))
-                }
+            val template = patches[screenIndex].mapIndexed { index, pixel ->
+                if (masks[screenIndex][index]) pixel or (0xff shl 24) else Color.TRANSPARENT
             }.toIntArray()
             templates.getOrPut(piece) { mutableListOf() }.add(template)
         }
@@ -201,6 +195,24 @@ class BoardRecognizer(@Suppress("UNUSED_PARAMETER") context: Context) {
         }
         lastError = "Фигуры изучены по начальной расстановке"
         return RecognizedBoard(rect, initial.copyOf(), whiteBottom, 1.0)
+    }
+    private fun foregroundMask(pixels: IntArray, bg: Int): List<Boolean> {
+        // Flood from the square boundary. A white piece can have almost the same
+        // fill as a light square; its closed dark contour still encloses the fill.
+        val reached = BooleanArray(pixels.size)
+        val queue = IntArray(pixels.size); var head = 0; var tail = 0
+        fun add(index: Int) {
+            if (!reached[index] && distance(pixels[index], bg) < 1500) { reached[index] = true; queue[tail++] = index }
+        }
+        for (i in 0 until n) { add(i); add((n - 1) * n + i); add(i * n); add(i * n + n - 1) }
+        while (head < tail) {
+            val i = queue[head++]
+            if (i % n > 0) add(i - 1)
+            if (i % n < n - 1) add(i + 1)
+            if (i >= n) add(i - n)
+            if (i < n * (n - 1)) add(i + n)
+        }
+        return reached.map { !it }
     }
     fun reset() { cached = null; templates.clear() }
 }

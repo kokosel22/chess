@@ -9,7 +9,7 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 
 data class EngineResult(val whiteCp: Int, val mate: Int?, val bestMove: Move?, val depth: Int) {
-    fun display() = mate?.let { "Мат ${if (it > 0) "+" else "−"}${kotlin.math.abs(it)}" }
+    fun display() = mate?.let { if (it == 0) "Мат" else "Мат ${if (it > 0) "+" else "−"}${kotlin.math.abs(it)}" }
         ?: String.format(java.util.Locale.US, "%+.2f", whiteCp / 100.0)
 }
 
@@ -59,8 +59,12 @@ class StockfishEngine(private val context: Context) : Closeable {
                 if (line.startsWith("info ") && !line.contains("lowerbound") && !line.contains("upperbound")) {
                     Regex("\\bdepth (\\d+)").find(line)?.let { depth = it.groupValues[1].toInt() }
                     Regex("\\bscore (cp|mate) (-?\\d+)").find(line)?.let {
-                        val value = it.groupValues[2].toInt() * if (position.white) 1 else -1
-                        if (it.groupValues[1] == "mate") { mate = value; cp = if (value > 0) 30000 else -30000 }
+                        val rawScore = it.groupValues[2].toInt()
+                        val value = rawScore * if (position.white) 1 else -1
+                        if (it.groupValues[1] == "mate") {
+                            mate = value
+                            cp = if (rawScore == 0) (if (position.white) -30000 else 30000) else if (value > 0) 30000 else -30000
+                        }
                         else { cp = value; mate = null }
                     }
                 }

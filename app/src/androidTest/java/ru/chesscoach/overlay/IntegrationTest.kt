@@ -24,6 +24,8 @@ class IntegrationTest {
             val mate = Position.fromFen("7k/8/5KQ1/8/8/8/8/8 w - - 0 1")
             val answer = engine.analyze(mate, 500)
             assertEquals("1-0", mate.play(answer.bestMove!!).outcome())
+            val terminal = engine.analyze(mate.play(answer.bestMove!!), 100)
+            assertTrue(terminal.whiteCp > 29000); assertNull(terminal.bestMove)
         }
     }
     private fun board(position: Position, whiteBottom: Boolean): Bitmap {
