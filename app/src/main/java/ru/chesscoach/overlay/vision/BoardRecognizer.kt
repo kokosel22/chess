@@ -14,6 +14,9 @@ class BoardRecognizer(@Suppress("UNUSED_PARAMETER") context: Context) {
     private val n = 28
     private val templates = mutableMapOf<Char, MutableList<IntArray>>()
     private var cached: Rect? = null
+    private var recognized: RecognizedBoard? = null
+    private var recognizedSignature: Long? = null
+    var fullRecognitionPasses = 0; private set
     var lastError = "Ищу доску"; private set
     fun locate(frame: Bitmap): Rect? {
         val scale = minOf(1.0, 360.0 / frame.width)
@@ -98,6 +101,25 @@ class BoardRecognizer(@Suppress("UNUSED_PARAMETER") context: Context) {
         return fits / 128.0
     }
     fun recognize(frame: Bitmap, rect: Rect, previousWhiteAtBottom: Boolean): RecognizedBoard? {
+        if (rect.left < 0 || rect.top < 0 || rect.right > frame.width || rect.bottom > frame.height || rect.isEmpty) return null
+        var signature = 1469598103934665603L
+        for (value in listOf(rect.left, rect.top, rect.width(), rect.height())) signature = (signature xor value.toLong()) * 1099511628211L
+        // A 96x96 fingerprint detects board changes before running all templates.
+        for (row in 0 until 96) for (col in 0 until 96) {
+            val x = rect.left + ((col + .5) * rect.width() / 96).toInt()
+            val y = rect.top + ((row + .5) * rect.height() / 96).toInt()
+            signature = (signature xor frame.getPixel(x, y).toLong()) * 1099511628211L
+        }
+        if (recognizedSignature == signature && recognized != null) {
+            lastError = "Доска распознана"
+            return recognized!!.copy(rect = Rect(rect), cells = recognized!!.cells.copyOf())
+        }
+        fullRecognitionPasses++
+        val result = recognizeFresh(frame, rect, previousWhiteAtBottom)
+        if (result != null) { recognizedSignature = signature; recognized = result.copy(rect = Rect(rect), cells = result.cells.copyOf()) }
+        return result
+    }
+    private fun recognizeFresh(frame: Bitmap, rect: Rect, previousWhiteAtBottom: Boolean): RecognizedBoard? {
         if (rect.right > frame.width || rect.bottom > frame.height) return null
         val crop = Bitmap.createBitmap(frame, rect.left, rect.top, rect.width(), rect.height())
         val normalized = Bitmap.createScaledBitmap(crop, n * 8, n * 8, true)
@@ -221,5 +243,5 @@ class BoardRecognizer(@Suppress("UNUSED_PARAMETER") context: Context) {
         }
         return reached.map { !it }
     }
-    fun reset() { cached = null; templates.clear() }
+    fun reset() { cached = null; templates.clear(); recognized = null; recognizedSignature = null; fullRecognitionPasses = 0 }
 }

@@ -4,7 +4,9 @@ import android.app.*
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
@@ -21,6 +23,7 @@ import ru.chesscoach.overlay.vision.BoardRecognizer
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 
 class CaptureService : Service() {
     private val main = Handler(Looper.getMainLooper())
@@ -28,7 +31,8 @@ class CaptureService : Service() {
     private lateinit var capture: Handler
     private lateinit var recognizer: BoardRecognizer
     private lateinit var engine: StockfishEngine
-    private val analysis = ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue<Runnable>(64))
+    // Persist all moves, but keep only the latest waiting live analysis.
+    private val analysis = ThreadPoolExecutor(1, 1, 0, TimeUnit.MILLISECONDS, ArrayBlockingQueue<Runnable>(1), ThreadPoolExecutor.DiscardOldestPolicy())
     private val tracker = GameTracker()
     private lateinit var store: ReportStore
     private var projection: MediaProjection? = null
@@ -36,14 +40,16 @@ class CaptureService : Service() {
     private var reader: ImageReader? = null
     private var overlay: CoachOverlay? = null
     private var screenWidth = 0; private var screenHeight = 0
+    private var paddedFrame: Bitmap? = null
+    private var captureFrame: Bitmap? = null
+    private var captureCanvas: Canvas? = null
     @Volatile private var frameRequested = false
     @Volatile private var hiddenAt = 0L
     @Volatile private var closing = false
     @Volatile private var geometryValid = true
     @Volatile private var stable: CharArray? = null
     private var stableCount = 0
-    private var lastEngineFen: String? = null
-    private var lastEngineResult: ru.chesscoach.overlay.engine.EngineResult? = null
+    @Volatile private var cachedAnalysis: Pair<String, ru.chesscoach.overlay.engine.EngineResult>? = null
     private var trackedAny = false
     private val tick = object : Runnable {
         override fun run() {
@@ -56,7 +62,7 @@ class CaptureService : Service() {
                 overlay?.hideForCapture(true)
             }
             if (!ChessAccessibilityService.permits()) AppState.clearAdvice(ChessAccessibilityService.reason)
-            main.postDelayed(this, 800)
+            main.postDelayed(this, 450)
         }
     }
     private val watchdog = object : Runnable {
@@ -96,21 +102,23 @@ class CaptureService : Service() {
             val open = PendingIntent.getActivity(this, 2, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
             val notification = Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ic_coach)
                 .setContentTitle("Шахматный тренер: захват экрана")
-                .setContentText("Локально. Подсказки разрешены только для ботов.")
+                .setContentText("Локально. Подсказки скрываются при метке «человек».")
                 .setContentIntent(open).setOngoing(true).addAction(Notification.Action.Builder(null, "Остановить", stopIntent).build()).build()
             startForeground(10, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
             captureThread = HandlerThread("board-recognition").apply { start() }; capture = Handler(captureThread.looper)
             recognizer = BoardRecognizer(this); engine = StockfishEngine(this); store = ReportStore(this)
             val bounds = getSystemService(WindowManager::class.java).maximumWindowMetrics.bounds
             screenWidth = bounds.width(); screenHeight = bounds.height()
-            reader = ImageReader.newInstance(screenWidth, screenHeight, PixelFormat.RGBA_8888, 3)
+            val captureWidth = minOf(screenWidth, 720)
+            val captureHeight = (screenHeight.toDouble() * captureWidth / screenWidth).roundToInt()
+            reader = ImageReader.newInstance(captureWidth, captureHeight, PixelFormat.RGBA_8888, 3)
             reader!!.setOnImageAvailableListener({ source -> readFrame(source) }, capture)
             projection = getSystemService(MediaProjectionManager::class.java).getMediaProjection(result, consent)
             projection!!.registerCallback(projectionCallback, main)
-            display = projection!!.createVirtualDisplay("ChessCoach", screenWidth, screenHeight, resources.configuration.densityDpi,
+            display = projection!!.createVirtualDisplay("ChessCoach", captureWidth, captureHeight, resources.configuration.densityDpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader!!.surface, null, capture)
             overlay = CoachOverlay(this) { stopSelf() }
-            AppState.running = true; AppState.boardRect = null
+            AppState.running = true; AppState.boardRect = null; AppState.capturedFrames = 0
             AppState.clearAdvice("Откройте новую стандартную партию с ботом. Доска: 2D; начальную расстановку оставьте до подтверждения.")
             main.post(tick); main.post(watchdog)
         } catch (e: Exception) { AppState.clearAdvice("Не удалось начать захват: ${e.message}"); stopSelf() }
@@ -119,15 +127,24 @@ class CaptureService : Service() {
     private fun readFrame(source: ImageReader) {
         val image = runCatching { source.acquireLatestImage() }.getOrNull() ?: return
         try {
-            if (closing || !geometryValid || !frameRequested || SystemClock.elapsedRealtime() - hiddenAt < 140) return
+            if (closing || !geometryValid || !frameRequested || SystemClock.elapsedRealtime() - hiddenAt < 90) return
             frameRequested = false
             val plane = image.planes[0]
             val rowPixels = plane.rowStride / plane.pixelStride
-            val padded = Bitmap.createBitmap(rowPixels, image.height, Bitmap.Config.ARGB_8888)
+            if (paddedFrame?.width != rowPixels || paddedFrame?.height != image.height) {
+                if (captureFrame !== paddedFrame) captureFrame?.recycle()
+                paddedFrame?.recycle()
+                paddedFrame = Bitmap.createBitmap(rowPixels, image.height, Bitmap.Config.ARGB_8888)
+                captureFrame = if (rowPixels == image.width) paddedFrame else Bitmap.createBitmap(image.width, image.height, Bitmap.Config.ARGB_8888)
+                captureCanvas = if (captureFrame === paddedFrame) null else Canvas(captureFrame!!)
+            }
+            val padded = paddedFrame!!
             padded.copyPixelsFromBuffer(plane.buffer)
-            val frame = Bitmap.createBitmap(padded, 0, 0, image.width, image.height)
+            captureCanvas?.drawBitmap(padded, 0f, 0f, null)
+            val frame = captureFrame!!
+            AppState.capturedFrames++
             try { processFrame(frame) }
-            finally { if (frame !== padded) frame.recycle(); padded.recycle(); main.post { overlay?.hideForCapture(false) } }
+            finally { main.post { overlay?.hideForCapture(false) } }
         } catch (e: Exception) {
             AppState.clearAdvice("Распознавание приостановлено: ${e.message}")
             main.post { overlay?.hideForCapture(false) }
@@ -135,12 +152,17 @@ class CaptureService : Service() {
     }
     private fun processFrame(frame: Bitmap) {
         if (closing) return
+        if (!ChessAccessibilityService.chessVisible) return
         val rect = recognizer.locate(frame)
         if (rect == null) {
             AppState.boardRect = null; stable = null; stableCount = 0
             ChessAccessibilityService.invalidate(recognizer.lastError); return
         }
-        AppState.boardRect = rect
+        AppState.boardRect = Rect(
+            (rect.left.toDouble() * screenWidth / frame.width).roundToInt(),
+            (rect.top.toDouble() * screenHeight / frame.height).roundToInt(),
+            (rect.right.toDouble() * screenWidth / frame.width).roundToInt(),
+            (rect.bottom.toDouble() * screenHeight / frame.height).roundToInt())
         main.post { overlay?.placeBelowBoard() }
         if (!ChessAccessibilityService.permits()) { stable = null; stableCount = 0; return }
         val epoch = ChessAccessibilityService.epoch
@@ -159,7 +181,11 @@ class CaptureService : Service() {
             is Observation.Advanced -> {
                 for (move in update.moves) { store.append(move); enqueueAnalysis(move, epoch) }
             }
-            Observation.Unchanged -> Unit
+            Observation.Unchanged -> {
+                val cached = cachedAnalysis
+                if (AppState.mode == CoachMode.HINTS && cached?.first == tracker.position?.fen() && valid(epoch))
+                    AppState.publish(Advice("Текущая позиция", cached!!.second.display(), cached.second.bestMove))
+            }
             is Observation.Rejected -> AppState.clearAdvice(update.reason)
         }
     }
@@ -168,20 +194,34 @@ class CaptureService : Service() {
         val p = Position.initial()
         enqueue {
             if (!valid(epoch)) return@enqueue
-            val result = engine.analyze(p)
-            lastEngineFen = p.fen(); lastEngineResult = result
-            if (valid(epoch) && AppState.mode == CoachMode.HINTS) AppState.publish(Advice("Тренировка с ботом", result.display(), result.bestMove))
+            val result = engine.analyze(p, 350)
+            cachedAnalysis = p.fen() to result
+            if (valid(epoch) && AppState.mode == CoachMode.HINTS && stable?.contentEquals(p.cells) == true)
+                AppState.publish(Advice("Текущая позиция", result.display(), result.bestMove))
         }
     }
     private fun enqueueAnalysis(move: TrackedMove, epoch: Long) {
+        if (AppState.mode == CoachMode.REVIEW) {
+            AppState.clearAdvice("Партия сохраняется. Движок запустится при разборе после остановки."); return
+        }
         val currentFen = tracker.position?.fen()
         enqueue {
             if (!valid(epoch)) return@enqueue
-            val before = if (lastEngineFen == move.before.fen()) lastEngineResult!! else engine.analyze(move.before)
+            val cached = cachedAnalysis
+            if (AppState.mode == CoachMode.HINTS) {
+                val result = engine.analyze(move.after, 350)
+                if (!valid(epoch)) return@enqueue
+                cachedAnalysis = move.after.fen() to result
+                if (cached?.first == move.before.fen()) store.evaluate(move.move.uci(), move.before.fen(), cached.second, result)
+                if (currentFen == move.after.fen() && stable?.contentEquals(move.after.cells) == true)
+                    AppState.publish(Advice("Текущая позиция", result.display(), result.bestMove))
+                return@enqueue
+            }
+            val before = if (cached?.first == move.before.fen()) cached.second else engine.analyze(move.before, 450)
             if (!valid(epoch)) return@enqueue
-            val after = engine.analyze(move.after)
+            val after = engine.analyze(move.after, 450)
             if (!valid(epoch)) return@enqueue
-            lastEngineFen = move.after.fen(); lastEngineResult = after
+            cachedAnalysis = move.after.fen() to after
             val loss = store.evaluate(move.move.uci(), move.before.fen(), before, after)
             // A finished analysis may not describe the current board anymore.
             if (AppState.mode == CoachMode.REVIEW) { AppState.clearAdvice("Партия сохраняется. Отчёт будет доступен после остановки."); return@enqueue }
@@ -219,6 +259,8 @@ class CaptureService : Service() {
         if (::capture.isInitialized) {
             capture.post {
                 runCatching { if (trackedAny) store.finish(tracker, "Захват остановлен. Неоценённые ходы можно разобрать в отчёте.") }
+                if (captureFrame !== paddedFrame) captureFrame?.recycle()
+                paddedFrame?.recycle(); captureFrame = null; paddedFrame = null; captureCanvas = null
                 reader?.close(); reader = null
             }
             captureThread.quitSafely()

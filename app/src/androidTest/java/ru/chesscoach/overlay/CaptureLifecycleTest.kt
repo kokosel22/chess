@@ -46,6 +46,7 @@ class CaptureLifecycleTest {
             assertNotNull("Android screen-capture consent button missing", consent)
             consent!!.click()
             assertTrue("Projection service failed to start", waitFor(12000) { AppState.running })
+            assertTrue("No actual projection frame received", waitFor(10000) { AppState.capturedFrames > 0 })
             assertFalse(ChessAccessibilityService.permits())
             assertNull(AppState.advice.arrow); assertNull(AppState.advice.evaluation)
             context.stopService(Intent(context, CaptureService::class.java))

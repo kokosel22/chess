@@ -11,7 +11,7 @@
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity>
         <service android:name=".capture.CaptureService" android:exported="false" android:foregroundServiceType="mediaProjection" />
-        <service android:name=".safety.ChessAccessibilityService" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true" android:label="Защита: только боты Chess.com">
+        <service android:name=".safety.ChessAccessibilityService" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="true" android:label="Chess Coach: проверка метки «человек»">
             <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
             <meta-data android:name="android.accessibilityservice" android:resource="@xml/accessibility" />
         </service>

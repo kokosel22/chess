@@ -65,10 +65,11 @@ class CoachOverlay(private val context: Context, private val stop: () -> Unit) {
     }
     private val panelParams = WindowManager.LayoutParams(dp(310), -2, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
         WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.TOP or Gravity.START; x = dp(8); y = dp(40) }
+    private var captureHidden = false
     private val refresh: () -> Unit = {
         val advice = AppState.advice
         label.text = "${AppState.mode.title}\n${advice.message}" + (advice.evaluation?.takeIf { ChessAccessibilityService.permits() }?.let { "\nОценка белых: $it" } ?: "")
-        drawing.invalidate()
+        updateDrawingVisibility(); drawing.invalidate()
     }
     init {
         try { manager.addView(drawing, drawParams); manager.addView(panel, panelParams) }
@@ -78,12 +79,19 @@ class CoachOverlay(private val context: Context, private val stop: () -> Unit) {
     fun placeBelowBoard() {
         val r = AppState.boardRect ?: return
         val display = manager.maximumWindowMetrics.bounds
-        panelParams.y = (r.bottom + dp(8)).coerceAtMost(display.height() - panel.height - dp(32)).coerceAtLeast(dp(32))
+        val y = (r.bottom + dp(8)).coerceAtMost(display.height() - panel.height - dp(32)).coerceAtLeast(dp(32))
+        if (panelParams.y == y) return
+        panelParams.y = y
         manager.updateViewLayout(panel, panelParams)
     }
     fun hideForCapture(hidden: Boolean) {
         // Prevent capturing our own arrows into templates during full-display projection.
-        drawing.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
+        captureHidden = hidden
+        updateDrawingVisibility()
+    }
+    private fun updateDrawingVisibility() {
+        val visibility = if (captureHidden || AppState.mode != CoachMode.HINTS || AppState.advice.arrow == null || !ChessAccessibilityService.permits()) View.INVISIBLE else View.VISIBLE
+        if (drawing.visibility != visibility) drawing.visibility = visibility
     }
     fun close() { AppState.listeners.remove(refresh); runCatching { manager.removeView(drawing) }; runCatching { manager.removeView(panel) } }
 }

@@ -1,7 +1,6 @@
 package ru.chesscoach.overlay.safety
 
 import android.accessibilityservice.AccessibilityService
-import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -11,50 +10,74 @@ import ru.chesscoach.overlay.AppState
 
 class ChessAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
+    private var lastScan = 0L
+    private var dirty = true
     private val poll = object : Runnable {
-        override fun run() { inspect(); handler.postDelayed(this, 200) }
+        override fun run() {
+            inspect()
+            handler.postDelayed(this, if (AppState.running) 400 else 1000)
+        }
     }
+    private val contentChanged = Runnable { inspect() }
     override fun onServiceConnected() { instance = this; handler.post(poll) }
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && event.packageName?.toString() !in listOf("com.chess", packageName)) invalidate("Экран изменился; проверяю режим")
-        inspect()
+        if (!AppState.running || event == null) return
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED || event.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            dirty = true
+            if (event.packageName?.toString() !in listOf("com.chess", packageName)) invalidate("Активный экран изменился")
+            inspect()
+        } else if (event.packageName?.toString() == "com.chess") {
+            dirty = true
+            if (!handler.hasCallbacks(contentChanged)) handler.postDelayed(contentChanged, 100)
+        }
     }
-    override fun onInterrupt() { invalidate("Проверка режима прервана") }
-    override fun onDestroy() { handler.removeCallbacksAndMessages(null); instance = null; invalidate("Включите службу проверки режима"); super.onDestroy() }
+    override fun onInterrupt() { invalidate("Чтение экрана прервано") }
+    override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null); instance = null; chessVisible = false
+        invalidate("Включите проверку метки «человек»"); super.onDestroy()
+    }
     private fun inspect() {
-        val root = rootInActiveWindow ?: run { invalidate("Не удаётся проверить активный экран"); return }
+        if (!AppState.running) { chessVisible = false; dirty = true; invalidate("Захват остановлен"); return }
+        val root = rootInActiveWindow ?: run { chessVisible = false; invalidate("Не удаётся прочитать активный экран"); return }
         val pkg = root.packageName?.toString().orEmpty()
-        if (pkg != "com.chess") { invalidate("Ожидаю официальное приложение Chess.com"); return }
-        val board = AppState.boardRect
-        val all = mutableListOf<String>(); val markers = mutableListOf<String>()
-        val screen = Rect(); root.getBoundsInScreen(screen)
+        chessVisible = pkg == "com.chess"
+        if (!chessVisible) { dirty = true; invalidate("Ожидаю официальное приложение Chess.com"); return }
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastScan < 350 || (!dirty && now - lastScan < 1000)) return
+        val all = mutableListOf<String>()
+        var visited = 0; var complete = root.isVisibleToUser
         fun visit(node: AccessibilityNodeInfo, depth: Int) {
-            if (depth > 24 || all.size > 600) return
+            if (depth > 24 || ++visited > 512) { complete = false; return }
             if (node.isVisibleToUser) {
-                val labels = listOfNotNull(node.text?.toString(), node.contentDescription?.toString())
-                all.addAll(labels)
-                val bounds = Rect(); node.getBoundsInScreen(bounds)
-                val id = node.viewIdResourceName.orEmpty().lowercase()
-                // Positive proof must be at the opponent header, never a menu link to Bots.
-                val opponentHeader = board != null && bounds.bottom <= board.top && bounds.top >= board.top - board.width() / 3 && bounds.left < board.right && bounds.right > board.left
-                if (opponentHeader && !node.isClickable && !id.contains("menu") && !id.contains("navigation")) markers.addAll(labels)
+                node.text?.toString()?.takeIf { it.isNotBlank() }?.let(all::add)
+                node.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let(all::add)
             }
-            for (i in 0 until node.childCount) node.getChild(i)?.let { visit(it, depth + 1) }
+            for (i in 0 until node.childCount) {
+                if (!complete) break
+                val child = node.getChild(i)
+                if (child != null) visit(child, depth + 1) else complete = false
+            }
         }
         visit(root, 0)
-        val result = BotPolicy.evaluate(ScreenEvidence(pkg, markers, all, board != null))
+        val result = BotPolicy.evaluate(ScreenEvidence(pkg, emptyList(), all, AppState.boardRect != null, complete))
         val wasAllowed = allowed
-        allowed = result.allowed; reason = result.reason; checkedAt = SystemClock.elapsedRealtime()
+        allowed = result.allowed; reason = result.reason; checkedAt = now
+        lastScan = now; dirty = false
         if (wasAllowed != allowed) epoch++
         if (!allowed) AppState.clearAdvice(reason)
     }
     companion object {
         @Volatile var instance: ChessAccessibilityService? = null; private set
         @Volatile private var allowed = false
-        @Volatile var reason = "Включите службу проверки режима"; private set
+        @Volatile var chessVisible = false; private set
+        @Volatile var reason = "Включите проверку метки «человек»"; private set
         @Volatile private var checkedAt = 0L
         @Volatile var epoch = 0L; private set
-        fun permits() = instance != null && allowed && SystemClock.elapsedRealtime() - checkedAt < 650
-        fun invalidate(message: String) { allowed = false; reason = message; checkedAt = 0; epoch++; AppState.clearAdvice(message) }
+        fun permits() = instance != null && AppState.running && allowed && SystemClock.elapsedRealtime() - checkedAt < 1800
+        fun invalidate(message: String) {
+            if (allowed) epoch++
+            allowed = false; reason = message; checkedAt = 0
+            AppState.clearAdvice(message)
+        }
     }
 }

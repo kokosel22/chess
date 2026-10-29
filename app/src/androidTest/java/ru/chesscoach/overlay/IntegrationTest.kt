@@ -70,7 +70,12 @@ class IntegrationTest {
         File(context.getExternalFilesDir(null), "fixture-initial.png").outputStream().use { initial.compress(Bitmap.CompressFormat.PNG, 100, it) }
         val calibration = recognizer.recognize(initial, Rect(0, 240, 720, 960), true)
         assertNotNull(recognizer.lastError, calibration); initial.recycle()
+        val unchanged = board(Position.initial(), true)
+        repeat(4) { assertNotNull(recognizer.recognize(unchanged, Rect(0, 240, 720, 960), true)) }
+        assertEquals("Unchanged frames must reuse recognition", 1, recognizer.fullRecognitionPasses)
+        unchanged.recycle()
         val result = recognizer.recognize(image, Rect(0, 240, 720, 960), true)!!
+        assertEquals("Changed pieces must trigger fresh recognition", 2, recognizer.fullRecognitionPasses)
         assertTrue(tracker.observe(result.cells) is Observation.Advanced)
         assertEquals(next.fen(), tracker.position!!.fen()); image.recycle()
     }

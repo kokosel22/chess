@@ -23,12 +23,16 @@ class GameTracker {
             return Observation.Initial
         }
         if (current.cells.contentEquals(board)) return Observation.Unchanged
+        if (current.cells.indices.count { current.cells[it] != board[it] } > 8)
+            return Observation.Rejected("Изменилось слишком много клеток; ожидаю устойчивую доску")
         val single = current.legalMoves().filter { current.applyUnchecked(it).cells.contentEquals(board) }
         if (single.size == 1) return accept(listOf(make(current, single.single())))
         // Recover a fast bot reply between frames only if exactly one legal two-ply path fits.
         val paths = mutableListOf<List<TrackedMove>>()
         for (first in current.legalMoves()) {
             val intermediate = current.applyUnchecked(first)
+            // One remaining legal move can change at most four cells (castling).
+            if (intermediate.cells.indices.count { intermediate.cells[it] != board[it] } > 4) continue
             for (second in intermediate.legalMoves()) {
                 val next = intermediate.applyUnchecked(second)
                 if (next.cells.contentEquals(board)) paths += listOf(make(current, first), make(intermediate, second))

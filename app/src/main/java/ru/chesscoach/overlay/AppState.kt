@@ -14,9 +14,16 @@ object AppState {
     @Volatile var whiteAtBottom = true
     @Volatile var playerWhite = true
     @Volatile var boardRect: Rect? = null
+    @Volatile var capturedFrames = 0
     @Volatile var advice = Advice("Готов к тренировке")
     val listeners = CopyOnWriteArraySet<() -> Unit>()
     private val main = Handler(Looper.getMainLooper())
-    fun publish(value: Advice) { advice = value; main.post { listeners.forEach { it() } } }
+    private val dispatch = Runnable { listeners.forEach { it() } }
+    @Synchronized fun publish(value: Advice) {
+        if (advice == value) return
+        advice = value
+        main.removeCallbacks(dispatch)
+        main.post(dispatch)
+    }
     fun clearAdvice(reason: String) { publish(Advice(reason)) }
 }

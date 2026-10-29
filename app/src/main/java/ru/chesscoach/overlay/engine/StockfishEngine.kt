@@ -32,8 +32,8 @@ class StockfishEngine(private val context: Context) : Closeable {
             finally { lines.offer("__eof__") }
         }, "stockfish-uci-reader").apply { isDaemon = true; start() }
         send("uci"); until("uciok", 12000)
-        send("setoption name Threads value 2")
-        send("setoption name Hash value 32")
+        send("setoption name Threads value 1")
+        send("setoption name Hash value 16")
         send("setoption name MultiPV value 1")
         send("isready"); until("readyok", 12000)
     }

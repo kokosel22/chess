@@ -88,12 +88,20 @@ class RulesTest {
         val b = Position.fromFen("4k3/8/8/4p3/8/8/8/4K3 w - - 0 2")
         assertEquals(a.repetitionKey(), b.repetitionKey())
     }
-    @Test fun onlyExplicitBotProofEnablesAnalysis() {
-        fun verdict(pkg: String = "com.chess", opponent: List<String> = listOf("Бот"), labels: List<String> = emptyList(), board: Boolean = true) = BotPolicy.evaluate(ScreenEvidence(pkg, opponent, labels, board)).allowed
-        assertTrue(verdict()); assertTrue(verdict(opponent = listOf("Computer")))
-        assertFalse(verdict(pkg = "org.browser")); assertFalse(verdict(board = false))
-        assertFalse(verdict(opponent = listOf("Martin"))); assertFalse(verdict(opponent = listOf("Играть с ботами")))
-        for (label in listOf("Rated", "Rapid", "Блиц", "Ежедневная партия", "Finding opponent")) assertFalse(verdict(labels = listOf(label)))
-        assertFalse(verdict(opponent = emptyList(), labels = listOf("Bot")))
+    @Test fun botBadgeIsNoLongerRequiredForReadableChessBoard() {
+        for (markers in listOf(emptyList(), listOf("Бот"), listOf("Martin")))
+            assertTrue(BotPolicy.evaluate(ScreenEvidence("com.chess", markers, emptyList(), true)).allowed)
+    }
+    @Test fun humanMarkerAndOnlineSignalsDisableHints() {
+        for (text in listOf("человек", "ЧЕЛОВЕК", "Соперник: человек", "Human", "HUMAN", "Rated", "Rapid", "БЛИЦ", "Ежедневная партия", "Finding opponent")) {
+            assertFalse(text, BotPolicy.evaluate(ScreenEvidence("com.chess", emptyList(), listOf(text), true)).allowed)
+        }
+        assertFalse(BotPolicy.evaluate(ScreenEvidence("com.chess", listOf("Человек"), listOf("Бот"), true)).allowed)
+        assertTrue(BotPolicy.evaluate(ScreenEvidence("com.chess", emptyList(), listOf("человеческий уровень"), true)).allowed)
+    }
+    @Test fun absentLabelsDoNotAuthorizeUnreadableOrOtherApps() {
+        assertFalse(BotPolicy.evaluate(ScreenEvidence("org.browser", emptyList(), emptyList(), true)).allowed)
+        assertFalse(BotPolicy.evaluate(ScreenEvidence("com.chess", emptyList(), emptyList(), false)).allowed)
+        assertFalse(BotPolicy.evaluate(ScreenEvidence("com.chess", emptyList(), emptyList(), true, complete = false)).allowed)
     }
 }
