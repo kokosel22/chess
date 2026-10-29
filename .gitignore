@@ -1,0 +1,12 @@
+.gradle/
+.idea/
+local.properties
+**/build/
+**/*.jks
+**/*.keystore
+app/src/main/jniLibs/
+app/src/main/assets/pieces/
+app/src/main/assets/stockfish/
+.cloud/
+*.zip
+*.apk

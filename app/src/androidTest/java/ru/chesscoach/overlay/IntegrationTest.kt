@@ -1,0 +1,91 @@
+package ru.chesscoach.overlay
+
+import android.content.Intent
+import android.graphics.*
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assert.*
+import org.junit.Test
+import org.junit.runner.RunWith
+import ru.chesscoach.overlay.chess.*
+import ru.chesscoach.overlay.engine.StockfishEngine
+import ru.chesscoach.overlay.storage.ReportStore
+import ru.chesscoach.overlay.vision.BoardRecognizer
+import java.io.File
+
+@RunWith(AndroidJUnit4::class)
+class IntegrationTest {
+    private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
+    @Test fun bundledStockfishRunsOfflineAndReturnsLegalMove() {
+        StockfishEngine(context).use { engine ->
+            val p = Position.initial()
+            val result = engine.analyze(p, 300)
+            assertTrue(result.depth > 0); assertTrue(result.bestMove in p.legalMoves())
+            val mate = Position.fromFen("7k/8/5KQ1/8/8/8/8/8 w - - 0 1")
+            val answer = engine.analyze(mate, 500)
+            assertEquals("1-0", mate.play(answer.bestMove!!).outcome())
+        }
+    }
+    private fun board(position: Position, whiteBottom: Boolean): Bitmap {
+        val image = Bitmap.createBitmap(720, 1280, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(image); canvas.drawColor(Color.rgb(38, 37, 34))
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        val top = 240; val cell = 90
+        for (r in 0..7) for (f in 0..7) {
+            paint.color = if ((r + f) % 2 == 0) Color.rgb(238, 238, 210) else Color.rgb(118, 150, 86)
+            val rect = Rect(f * cell, top + r * cell, (f + 1) * cell, top + (r + 1) * cell)
+            canvas.drawRect(rect, paint)
+            val index = if (whiteBottom) (7 - r) * 8 + f else r * 8 + 7 - f
+            val piece = position.cells[index]
+            if (piece != '.') {
+                val name = (if (piece.isUpperCase()) "w" else "b") + piece.lowercaseChar()
+                val sprite = context.assets.open("pieces/$name.png").use { BitmapFactory.decodeStream(it) }
+                canvas.drawBitmap(sprite, null, rect, paint); sprite.recycle()
+            }
+        }
+        return image
+    }
+    @Test fun findsBoardAndRecognizesPiecesBothOrientations() {
+        val recognizer = BoardRecognizer(context)
+        for (orientation in listOf(true, false)) {
+            val image = board(Position.initial(), orientation)
+            val rect = recognizer.locate(image); assertNotNull(rect)
+            assertTrue(kotlin.math.abs(rect!!.top - 240) <= 8)
+            val result = recognizer.recognize(image, rect, true)
+            assertNotNull(result); assertArrayEquals(Position.initial().cells, result!!.cells); assertEquals(orientation, result.whiteAtBottom)
+            image.recycle(); recognizer.reset()
+        }
+    }
+    @Test fun recognizesMovedPositionWithRightsPreservedByTracker() {
+        val tracker = GameTracker(); tracker.observe(Position.initial().cells)
+        val next = Position.initial().play(Move.parse("g1f3"))
+        val image = board(next, true); val recognizer = BoardRecognizer(context)
+        val result = recognizer.recognize(image, Rect(0, 240, 720, 960), true)!!
+        assertTrue(tracker.observe(result.cells) is Observation.Advanced)
+        assertEquals(next.fen(), tracker.position!!.fen()); image.recycle()
+    }
+    @Test fun refusesUncertainOrCoveredBoard() {
+        val image = Bitmap.createBitmap(720, 1280, Bitmap.Config.ARGB_8888)
+        image.eraseColor(Color.BLACK); assertNull(BoardRecognizer(context).locate(image)); image.recycle()
+    }
+    @Test fun writesAtomicReportAndPgn() {
+        val tracker = GameTracker(); tracker.observe(Position.initial().cells)
+        val after = Position.initial().play(Move.parse("e2e4"))
+        val update = tracker.observe(after.cells) as Observation.Advanced
+        val store = ReportStore(context); store.append(update.moves.single()); store.finish(tracker, "Тест")
+        val file = File(context.filesDir, "games/${store.id}.json")
+        try {
+            val game = ReportStore.load(file)
+            assertTrue(ReportStore.pgn(game).contains("1. e4 *"))
+            assertTrue(ReportStore.report(game).contains("без оценки"))
+        } finally { file.delete() }
+    }
+    @Test fun launchesRussianHomeAndSavesScreenshot() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        instrumentation.waitForIdleSync()
+        val image = instrumentation.uiAutomation.takeScreenshot()
+        File(context.getExternalFilesDir(null), "home.png").outputStream().use { image.compress(Bitmap.CompressFormat.PNG, 100, it) }; image.recycle()
+        instrumentation.runOnMainSync { activity.finish() }
+    }
+}
