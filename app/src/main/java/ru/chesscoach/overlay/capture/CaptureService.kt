@@ -43,6 +43,8 @@ class CaptureService : Service() {
     private var paddedFrame: Bitmap? = null
     private var captureFrame: Bitmap? = null
     private var captureCanvas: Canvas? = null
+    private var latestImage: android.media.Image? = null
+    private val consumeRequestedFrame = Runnable { consumeFrame() }
     @Volatile private var frameRequested = false
     @Volatile private var hiddenAt = 0L
     @Volatile private var closing = false
@@ -61,6 +63,8 @@ class CaptureService : Service() {
                 hiddenAt = SystemClock.elapsedRealtime(); frameRequested = true
                 overlay?.hideForCapture(true)
             }
+            capture.removeCallbacks(consumeRequestedFrame)
+            capture.postDelayed(consumeRequestedFrame, 110)
             if (!ChessAccessibilityService.permits()) AppState.clearAdvice(ChessAccessibilityService.reason)
             main.postDelayed(this, 450)
         }
@@ -126,29 +130,44 @@ class CaptureService : Service() {
     }
     private fun readFrame(source: ImageReader) {
         val image = runCatching { source.acquireLatestImage() }.getOrNull() ?: return
+        if (closing) { image.close(); return }
+        // Retain the most recent buffer without copying every display refresh.
+        // Holding one image still leaves two slots for acquireLatestImage().
+        latestImage?.close()
+        latestImage = image
+        if (frameRequested && SystemClock.elapsedRealtime() - hiddenAt >= 90) consumeFrame()
+    }
+    private fun consumeFrame() {
+        if (closing || !geometryValid || !frameRequested) return
+        if (SystemClock.elapsedRealtime() - hiddenAt < 90) return
+        val image = latestImage
+        latestImage = null
+        if (image == null && captureFrame == null) return
+        frameRequested = false
         try {
-            if (closing || !geometryValid || !frameRequested || SystemClock.elapsedRealtime() - hiddenAt < 90) return
-            frameRequested = false
-            val plane = image.planes[0]
-            val rowPixels = plane.rowStride / plane.pixelStride
-            if (paddedFrame?.width != rowPixels || paddedFrame?.height != image.height) {
-                if (captureFrame !== paddedFrame) captureFrame?.recycle()
-                paddedFrame?.recycle()
-                paddedFrame = Bitmap.createBitmap(rowPixels, image.height, Bitmap.Config.ARGB_8888)
-                captureFrame = if (rowPixels == image.width) paddedFrame else Bitmap.createBitmap(image.width, image.height, Bitmap.Config.ARGB_8888)
-                captureCanvas = if (captureFrame === paddedFrame) null else Canvas(captureFrame!!)
+            if (image != null) {
+                val plane = image.planes[0]
+                val rowPixels = plane.rowStride / plane.pixelStride
+                if (paddedFrame?.width != rowPixels || paddedFrame?.height != image.height) {
+                    if (captureFrame !== paddedFrame) captureFrame?.recycle()
+                    paddedFrame?.recycle()
+                    paddedFrame = Bitmap.createBitmap(rowPixels, image.height, Bitmap.Config.ARGB_8888)
+                    captureFrame = if (rowPixels == image.width) paddedFrame else Bitmap.createBitmap(image.width, image.height, Bitmap.Config.ARGB_8888)
+                    captureCanvas = if (captureFrame === paddedFrame) null else Canvas(captureFrame!!)
+                }
+                paddedFrame!!.copyPixelsFromBuffer(plane.buffer)
+                captureCanvas?.drawBitmap(paddedFrame!!, 0f, 0f, null)
+                AppState.capturedFrames++
             }
-            val padded = paddedFrame!!
-            padded.copyPixelsFromBuffer(plane.buffer)
-            captureCanvas?.drawBitmap(padded, 0f, 0f, null)
-            val frame = captureFrame!!
-            AppState.capturedFrames++
-            try { processFrame(frame) }
-            finally { main.post { overlay?.hideForCapture(false) } }
+            // A static display may emit no new buffers. Reuse the last frame for
+            // the stability interval; future changed buffers are retained above.
+            captureFrame?.let { processFrame(it) }
         } catch (e: Exception) {
             AppState.clearAdvice("Распознавание приостановлено: ${e.message}")
+        } finally {
+            image?.close()
             main.post { overlay?.hideForCapture(false) }
-        } finally { image.close() }
+        }
     }
     private fun processFrame(frame: Bitmap) {
         if (closing) return
@@ -261,6 +280,7 @@ class CaptureService : Service() {
                 runCatching { if (trackedAny) store.finish(tracker, "Захват остановлен. Неоценённые ходы можно разобрать в отчёте.") }
                 if (captureFrame !== paddedFrame) captureFrame?.recycle()
                 paddedFrame?.recycle(); captureFrame = null; paddedFrame = null; captureCanvas = null
+                latestImage?.close(); latestImage = null
                 reader?.close(); reader = null
             }
             captureThread.quitSafely()
