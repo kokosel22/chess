@@ -63,11 +63,11 @@ class BoardRecognizer(@Suppress("UNUSED_PARAMETER") context: Context) {
             val by = (rect.top + boundary * cell).roundToInt()
             val sx = (rect.left + (sample + .10) * cell).toInt()
             if (bx > 0 && bx + 1 < image.width && sy in 0 until image.height) {
-                if (distance(image.getPixel(bx - 1, sy), image.getPixel(bx + 1, sy)) > 2200) fit++
+                if (distance(image.getPixel(bx - 1, sy), image.getPixel(bx, sy)) > 2200) fit++
                 total++
             }
             if (by > 0 && by + 1 < image.height && sx in 0 until image.width) {
-                if (distance(image.getPixel(sx, by - 1), image.getPixel(sx, by + 1)) > 2200) fit++
+                if (distance(image.getPixel(sx, by - 1), image.getPixel(sx, by)) > 2200) fit++
                 total++
             }
         }
@@ -209,7 +209,7 @@ class BoardRecognizer(@Suppress("UNUSED_PARAMETER") context: Context) {
         val reached = BooleanArray(pixels.size)
         val queue = IntArray(pixels.size); var head = 0; var tail = 0
         fun add(index: Int) {
-            if (!reached[index] && distance(pixels[index], bg) < 1500) { reached[index] = true; queue[tail++] = index }
+            if (!reached[index] && distance(pixels[index], bg) < 700) { reached[index] = true; queue[tail++] = index }
         }
         for (i in 0 until n) { add(i); add((n - 1) * n + i); add(i * n); add(i * n + n - 1) }
         while (head < tail) {

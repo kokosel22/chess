@@ -124,7 +124,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           cores: 2
-          ram-size: 2048M
+          ram-size: 3072M
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
           script: bash scripts/run-device-tests.sh

@@ -38,7 +38,8 @@ class CaptureLifecycleTest {
             assertTrue("Accessibility guard did not connect", connected)
             UiScrollable(UiSelector().scrollable(true)).scrollTextIntoView("Начать тренировку")
             checkNotNull(device.wait(Until.findObject(By.text("Начать тренировку")), 5000)).click()
-            checkNotNull(device.wait(Until.findObject(By.text("Продолжить")), 5000)).click()
+            // Android's native dialog theme transforms button text to uppercase.
+            checkNotNull(device.wait(Until.findObject(By.res("android", "button1")), 5000)).click()
             val consent = device.wait(Until.findObject(By.res("com.android.systemui", "start_button")), 4000)
                 ?: device.wait(Until.findObject(By.res("android", "button1")), 4000)
                 ?: device.wait(Until.findObject(By.text(Pattern.compile("Start now|Start|Начать|Начать сейчас"))), 4000)
