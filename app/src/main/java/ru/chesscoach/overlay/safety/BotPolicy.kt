@@ -9,8 +9,8 @@ object BotPolicy {
     fun evaluate(e: ScreenEvidence): Verdict {
         if (e.packageName != "com.chess") return Verdict(false, "Ожидаю официальное приложение Chess.com")
         if (!e.hasBoard) return Verdict(false, "Ожидаю шахматную доску")
-        if (e.allLabels.any { human.containsMatchIn(it) }) return Verdict(false, "Онлайн-партия или неизвестный режим: подсказки отключены")
-        if (e.opponentMarkers.none { proof.matches(it.trim()) }) return Verdict(false, "Нет явной метки «Бот» у соперника — анализ заблокирован")
+        if (e.allLabels.any { human.containsMatchIn(it.lowercase(java.util.Locale.ROOT)) }) return Verdict(false, "Онлайн-партия или неизвестный режим: подсказки отключены")
+        if (e.opponentMarkers.none { proof.matches(it.trim().lowercase(java.util.Locale.ROOT)) }) return Verdict(false, "Нет явной метки «Бот» у соперника — анализ заблокирован")
         return Verdict(true, "Подтверждена тренировка с ботом")
     }
 }

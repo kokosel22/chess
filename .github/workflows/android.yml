@@ -84,13 +84,30 @@ jobs:
           cp .cloud/stockfish-source.tar.gz .cloud/delivery/
           cp .cloud/BUILD-STOCKFISH.sh .cloud/delivery/
           git archive --format=tar.gz -o .cloud/delivery/chess-coach-source.tar.gz HEAD
-          sha256sum .cloud/delivery/ChessCoachOverlay-arm64-debug.apk > .cloud/delivery/SHA256SUMS.txt
+          (cd .cloud/delivery && sha256sum ChessCoachOverlay-arm64-debug.apk > SHA256SUMS.txt)
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose .cloud/delivery/ChessCoachOverlay-arm64-debug.apk
       - name: Upload installable ARM64 APK
         uses: actions/upload-artifact@v4
         with:
           name: ChessCoachOverlay-Redmi12-debug
-          path: .cloud/delivery/
+          path: |
+            .cloud/delivery/ChessCoachOverlay-arm64-debug.apk
+            .cloud/delivery/INSTALL-RU.md
+            .cloud/delivery/THIRD-PARTY.md
+            .cloud/delivery/SHA256SUMS.txt
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30
+          compression-level: 1
+      - name: Upload full corresponding source
+        uses: actions/upload-artifact@v4
+        with:
+          name: corresponding-source-GPL
+          path: |
+            .cloud/delivery/stockfish-source.tar.gz
+            .cloud/delivery/chess-coach-source.tar.gz
+            .cloud/delivery/BUILD-STOCKFISH.sh
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 30
           compression-level: 1
@@ -123,4 +140,5 @@ jobs:
             app/build/outputs/androidTest-results/
             .cloud/screenshots/
           retention-days: 14
+          include-hidden-files: true
           if-no-files-found: warn

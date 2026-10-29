@@ -48,6 +48,9 @@ class CaptureService : Service() {
     private val tick = object : Runnable {
         override fun run() {
             if (closing) return
+            if (!android.provider.Settings.canDrawOverlays(this@CaptureService)) {
+                AppState.clearAdvice("Разрешение показа поверх окон отозвано"); stopSelf(); return
+            }
             if (!frameRequested) {
                 hiddenAt = SystemClock.elapsedRealtime(); frameRequested = true
                 overlay?.hideForCapture(true)
@@ -131,6 +134,7 @@ class CaptureService : Service() {
         } finally { image.close() }
     }
     private fun processFrame(frame: Bitmap) {
+        if (closing) return
         val rect = recognizer.locate(frame)
         if (rect == null) {
             AppState.boardRect = null; stable = null; stableCount = 0
@@ -143,7 +147,7 @@ class CaptureService : Service() {
         val board = recognizer.recognize(frame, rect, AppState.whiteAtBottom)
         if (board == null) { stable = null; stableCount = 0; AppState.clearAdvice(recognizer.lastError); return }
         AppState.whiteAtBottom = board.whiteAtBottom
-        if (!ChessAccessibilityService.permits() || epoch != ChessAccessibilityService.epoch) return
+        if (closing || !ChessAccessibilityService.permits() || epoch != ChessAccessibilityService.epoch) return
         if (stable?.contentEquals(board.cells) == true) stableCount++ else { stable = board.cells.copyOf(); stableCount = 1; AppState.clearAdvice("Проверяю устойчивость позиции") }
         if (stableCount < 2) return
         when (val update = tracker.observe(board.cells)) {
